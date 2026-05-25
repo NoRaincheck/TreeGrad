@@ -114,3 +114,12 @@ dmypy.json
 .pyre/
 .vscode/settings.json
 treegrad/version.py
+
+# uv
+uv.lock
+
+# ruff cache
+.ruff_cache/
+
+# ty cache
+.ty_cache/

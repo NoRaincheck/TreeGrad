@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "treegrad"
+version = "2.0.0"
+description = "Transfer parameters from lightgbm to differentiable decision trees!"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Chapman Siu", email = "chpmn.siu@gmail.com" },
+]
+requires-python = ">=3.9"
+dependencies = [
+    "lightgbm",
+    "scikit-learn",
+    "autograd",
+    "numpy",
+    "pandas",
+    "scipy",
+]
+
+[project.optional-dependencies]
+torch = [
+    "torch",
+    "torchvision",
+]
+dev = [
+    "ruff",
+    "ty",
+    "pytest",
+    "pytest-cov",
+]
+notebooks = [
+    "jupyter",
+    "matplotlib",
+    "seaborn",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["treegrad"]
+
+[project.urls]
+Homepage = "https://github.com/chappers/TreeGrad"
+Repository = "https://github.com/chappers/TreeGrad"
+Issues = "https://github.com/chappers/TreeGrad/issues"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I001"]
+
+[tool.pytest.ini_options]
+testpaths = ["treegrad/tests"]

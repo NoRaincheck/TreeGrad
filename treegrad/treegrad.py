@@ -34,15 +34,21 @@ class BaseTreeGrad(BaseEstimator):
         max_depth=-1,
         learning_rate=0.1,
         n_estimators=100,
-        autograd_config={"refit_splits": False, "batch_size": 32},
+        autograd_config=None,
     ):
+        if autograd_config is None:
+            autograd_config = {"refit_splits": False, "batch_size": 32}
+        self.num_leaves = num_leaves
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.n_estimators = n_estimators
+        self.autograd_config = autograd_config
         self.ensemble_config = {
             "num_leaves": num_leaves,
             "max_depth": max_depth,
             "learning_rate": learning_rate,
             "n_estimators": n_estimators,
         }
-        self.autograd_config = autograd_config
 
 
 class TGDClassifier(BaseTreeGrad, ClassifierMixin):
@@ -74,9 +80,14 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
         else:
             y_ohe = LabelBinarizer().fit_transform(y)
 
+        # Cache coefficient/intercept values computed from tree thresholds.
+        # This ensures decision boundaries stay consistent across batches
+        # that may have different feature ranges.
+        coef_cache = {}
+
         if nclass > 2:
             trees = split_trees_by_classes(trees_, nclass)
-            trees_params = multiclass_trees_to_param(X, y, trees)
+            trees_params = multiclass_trees_to_param(X, y, trees, _cache=coef_cache)
             model_ = gbm_gen(
                 trees_params[0], X, trees_params[2], trees_params[1], True, nclass
             )
@@ -98,7 +109,7 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
                 return loglik + reg
 
         else:
-            trees_params = multi_tree_to_param(X, y, trees_)
+            trees_params = multi_tree_to_param(X, y, trees_, _cache=coef_cache)
             model_ = gbm_gen(
                 trees_params[0], X, trees_params[2], trees_params[1], False, 2
             )
@@ -132,6 +143,9 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
 
         self.base_param_ = copy.deepcopy(trees_params)
         self.partial_param_ = param_
+        self._coef_cache = coef_cache  # reuse for subsequent partial_fit calls
+        self._X_train_ = X             # store original data for replay in partial_fit_param
+        self._y_train_ = y
         self.is_partial = True
         return self
 
@@ -140,7 +154,14 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
         check_is_fitted(self, "base_param_")
         check_is_fitted(self, "partial_param_")
 
-        batch_indices = generate_batch(X, self.autograd_config.get("batch_size", 32))
+        # Replay original training data alongside new batch to prevent catastrophic forgetting.
+        if hasattr(self, '_X_train_'):
+            X_combined = np.vstack([self._X_train_, X])
+            y_combined = np.concatenate([self._y_train_, y])
+        else:
+            X_combined, y_combined = X, y
+
+        batch_indices = generate_batch(X_combined, self.autograd_config.get("batch_size", 32))
 
         esp = 1e-11  # where should this live?
         step_size = self.autograd_config.get("step_size", 0.05)
@@ -151,9 +172,9 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
         nclass = self.n_classes_
 
         if nclass == 2:
-            y_ohe = y
+            y_ohe = y_combined
         else:
-            y_ohe = LabelBinarizer().fit_transform(y)
+            y_ohe = LabelBinarizer().fit_transform(y_combined)
 
         if nclass > 2:
             model_ = gbm_gen(
@@ -296,7 +317,9 @@ class TGDRegressor(BaseTreeGrad, RegressorMixin):
         model_dump = self.base_model_.booster_.dump_model()
         trees_ = [m["tree_structure"] for m in model_dump["tree_info"]]
 
-        trees_params = multi_tree_to_param(X, y, trees_)
+        # Cache coefficient/intercept values computed from tree thresholds.
+        coef_cache = {}
+        trees_params = multi_tree_to_param(X, y, trees_, _cache=coef_cache)
         model_ = gbm_gen(trees_params[0], X, trees_params[2], trees_params[1], False, 2)
 
         def training_loss(weights, idx=0):
@@ -328,6 +351,9 @@ class TGDRegressor(BaseTreeGrad, RegressorMixin):
 
         self.base_param_ = copy.deepcopy(trees_params)
         self.partial_param_ = param_
+        self._coef_cache = coef_cache  # reuse for subsequent partial_fit calls
+        self._X_train_ = X             # store original data for replay in partial_fit_param
+        self._y_train_ = y
         self.is_partial = True
         return self
 
@@ -336,7 +362,14 @@ class TGDRegressor(BaseTreeGrad, RegressorMixin):
         check_is_fitted(self, "base_param_")
         check_is_fitted(self, "partial_param_")
 
-        batch_indices = generate_batch(X, self.autograd_config.get("batch_size", 32))
+        # Replay original training data alongside new batch to prevent catastrophic forgetting.
+        if hasattr(self, '_X_train_'):
+            X_combined = np.vstack([self._X_train_, X])
+            y_combined = np.concatenate([self._y_train_, y])
+        else:
+            X_combined, y_combined = X, y
+
+        batch_indices = generate_batch(X_combined, self.autograd_config.get("batch_size", 32))
 
         esp = 1e-11  # where should this live?
         step_size = self.autograd_config.get("step_size", 0.05)
@@ -347,14 +380,14 @@ class TGDRegressor(BaseTreeGrad, RegressorMixin):
         nclass = self.n_classes_
 
         model_ = gbm_gen(
-            self.base_param_[0], X, self.base_param_[2], self.base_param_[1], False, 2
+            self.base_param_[0], X_combined, self.base_param_[2], self.base_param_[1], False, 2
         )
 
         def training_loss(weights, idx=0):
             # Training loss is the negative log-likelihood of the training labels.
             t_idx_ = batch_indices(idx)
-            preds = sigmoid(model_(weights, X[t_idx_, :]))
-            label_probabilities = preds * y[t_idx_] + (1 - preds) * (1 - y[t_idx_])
+            preds = sigmoid(model_(weights, X_combined[t_idx_, :]))
+            label_probabilities = preds * y_combined[t_idx_] + (1 - preds) * (1 - y_combined[t_idx_])
             # print(label_probabilities)
             loglik = -np.sum(np.log(label_probabilities))
 

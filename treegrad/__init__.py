@@ -1,7 +1,3 @@
-from treegrad.treegrad import TGDClassifier, TGDRegressor
-import warnings
+"""TreeGrad: Transfer parameters from lightgbm to differentiable decision trees."""
 
-try:
-    from treegrad.version import version as __version__  # NOQA
-except:
-    warnings.warn("Could not import version, has package been installed?")
+from treegrad.treegrad import TGDClassifier, TGDRegressor

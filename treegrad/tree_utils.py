@@ -444,10 +444,12 @@ def split_trees_by_classes(trees, n_classes):
     return trees_by_classes
 
 
-def calculate_boundary(X, boundary_value, column):
+def calculate_boundary(X, boundary_value, column, _cache=None):
     """
-    We probably want to take the range of X[column]
-    to determine approximately the correct value
+    Compute linear boundary coefficients for a tree split.
+    If _cache is provided and contains an entry for this node,
+    returns the cached (coef, inter) to keep decision boundaries
+    consistent across batches with different feature ranges.
     """
     x_range = np.max(X[:, column]) - np.min(X[:, column])
     coef_ = 1
@@ -458,12 +460,17 @@ def calculate_boundary(X, boundary_value, column):
         coef_ = max(x_range / 2, 1.0)
         inter = [coef_ * -boundary_value]
 
-    # print(coef_, inter)
+    if _cache is not None and column in _cache:
+        return _cache[column], _cache[f"{column}.inter"]
+
     coef = ([coef_], [0], [column])
+    if _cache is not None:
+        _cache[column] = coef
+        _cache[f"{column}.inter"] = inter
     return coef, inter
 
 
-def boundary_weights(X, y, tree_dict, boundary_dict, output="dict"):
+def boundary_weights(X, y, tree_dict, boundary_dict, output="dict", _cache=None):
     """
     This recursively goes down the nodes and returns the
     results by extending boundary dict(?)
@@ -479,7 +486,7 @@ def boundary_weights(X, y, tree_dict, boundary_dict, output="dict"):
 
     for node in unseen_nodes:
         coef, inter = calculate_boundary(
-            X, boundary_dict[node]["value"], boundary_dict[node]["column"]
+            X, boundary_dict[node]["value"], boundary_dict[node]["column"], _cache=_cache
         )
         boundary_dict[node]["coef"] = coef
         boundary_dict[node]["inter"] = inter
@@ -504,13 +511,13 @@ def boundary_weights(X, y, tree_dict, boundary_dict, output="dict"):
 
 
 # from tree build the sparse coef representation
-def tree_to_nnet(X, y, tree):
+def tree_to_nnet(X, y, tree, _cache=None):
     """
     Outputs the parameters for neural network
     """
     t_d, b_d, _ = get_route(tree)
     tt = Tree(tree=t_d)
-    boundary_dict = boundary_weights(X, y, t_d, b_d, output="dict")
+    boundary_dict = boundary_weights(X, y, t_d, b_d, output="dict", _cache=_cache)
     return boundary_dict, tt.route
 
 
@@ -583,8 +590,8 @@ def old_route_to_new_route(route, num_nodes):
         return None
 
 
-def tree_to_param(X, y, tree):
-    boundary, route = tree_to_nnet(X, y, tree)
+def tree_to_param(X, y, tree, _cache=None):
+    boundary, route = tree_to_nnet(X, y, tree, _cache=_cache)
     boundary_test = boundary_dict_mapping(X, boundary)
     params, _ = boundary_test
     coef_, inter_, leaf = params
@@ -597,16 +604,16 @@ def tree_to_param(X, y, tree):
     return param, (coef != 0) * 1.0, old_route_to_new_route(route, param[0].shape[0])
 
 
-def multi_tree_to_param(X, y, trees):
-    param_route = [tree_to_param(X, y, tree) for tree in trees]
+def multi_tree_to_param(X, y, trees, _cache=None):
+    param_route = [tree_to_param(X, y, tree, _cache=_cache) for tree in trees]
     all_param = flatten([x[0] for x in param_route])
     all_sparse_info = [x[1] for x in param_route]
     all_route = [x[2] for x in param_route]
     return all_param, all_sparse_info, all_route
 
 
-def multiclass_trees_to_param(X, y, multitrees):
-    param_list = [multi_tree_to_param(X, y, tree_x) for tree_x in multitrees]
+def multiclass_trees_to_param(X, y, multitrees, _cache=None):
+    param_list = [multi_tree_to_param(X, y, tree_x, _cache=_cache) for tree_x in multitrees]
     all_param = flatten([x[0] for x in param_list])
     all_sparse_info = [x[1] for x in param_list]
     all_route = [x[2] for x in param_list]

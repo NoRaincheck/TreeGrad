@@ -1,73 +1,73 @@
-# TreeGrad
+# TreeGrad 2.0
 
 [![PyPI version](https://badge.fury.io/py/treegrad.png)](https://badge.fury.io/py/treegrad)
 
 `TreeGrad` implements a naive approach to converting a Gradient Boosted Tree Model to an Online trainable model. It does this by creating differentiable tree models which can be learned via auto-differentiable frameworks. `TreeGrad` is in essence an implementation of Kontschieder, Peter, et al. "Deep neural decision forests." with extensions.
 
-To install
+## Install (uv)
 
+```bash
+# Create virtual environment & install package
+uv venv && source .venv/bin/activate        # Linux/macOS
+uv pip install -e ".[dev]"                   # editable + dev tools
+uv pip install -e ".[torch]"                 # with PyTorch support
 ```
-python setup.py install
-```
 
-or alternatively from pypi
+or alternatively from pypi:
 
-
-```
+```bash
 pip install treegrad
 ```
 
-Run tests:
+## Run Tests (pytest)
 
-```
-python -m nose2
-```
-
-```
-@inproceedings{siu2019transferring,
-  title={Transferring Tree Ensembles to Neural Networks},
-  author={Siu, Chapman},
-  booktitle={International Conference on Neural Information Processing},
-  pages={471--480},
-  year={2019},
-  organization={Springer}
-}
+```bash
+uv run pytest -v
+uv run pytest --cov=treegrad    # with coverage
 ```
 
-Link: https://arxiv.org/abs/1904.11132
+## Lint & Format
 
+```bash
+ruff check . && ruff format .   # Python linting/formatting
+deno fmt --group dev .          # Markdown/config formatting
+ty check .                      # type checking
+```
 
-# Usage
+See [AGENTS.md](AGENTS.md) for full agent guidelines.
+
+## Usage
 
 ```py
-from sklearn.
+from sklearn.datasets import make_classification
 import treegrad as tgd
 
-mod = tgd.TGDClassifier(num_leaves=31, max_depth=-1, learning_rate=0.1, n_estimators=100, autograd_config={'refit_splits':False})
+X, y = make_classification(1000, n_classes=3, random_state=42)
+
+mod = tgd.TGDClassifier(num_leaves=31, max_depth=-1, learning_rate=0.1, n_estimators=100)
 mod.fit(X, y)
-mod.partial_fit(X, y)
+mod.partial_fit(X, y)  # online / incremental learning
 ```
 
-# Requirments
+## Requirements
 
-The requirements for this package are:
+Core dependencies:
 
-*  lightgbm
-*  scikit-learn
-*  autograd
+* lightgbm
+* scikit-learn
+* autograd
 
-Future plans:
+Optional extras (via pyproject.toml):
 
-*  Add implementation for Neural Architecture search for decision boundary splits (requires a bit of clean up - TBA)
-   *  Implementation can be done quite trivially using objects residing in `tree_utils.py` - Challenge is getting this working in a sane manner with `scikit-learn` interface.
-*  GPU enabled auto differentiation framework - see `notebooks/` for progress off Colab for Tensorflow 2.0 port
-*  support xgboost/lightgbm additional features such as monotone constraints
-*  Support `RegressorMixin`
+| Group     | Contents                          |
+|-----------|-----------------------------------|
+| `dev`     | ruff, ty, pytest, pytest-cov      |
+| `torch`   | torch, torchvision                |
+| `notebooks`| jupyter, matplotlib, seaborn     |
 
-# Results
+## Results
 
-When decision splits are reset and subsequently re-learned, TreeGrad can be competitive in performance with popular implementations (albeit an order of magnitude slower). Below is a table showing accuracy on test dataset on UCI benchmark datasets for Boosted Ensemble models (100 trees)
-
+When decision splits are reset and subsequently re-learned, TreeGrad can be competitive in performance with popular implementations (albeit an order of magnitude slower). Below is a table showing accuracy on test dataset on UCI benchmark datasets for Boosted Ensemble models (100 trees):
 
 | Dataset  | TreeGrad  | LightGBM  | Scikit-Learn (Gradient Boosting Classifier) |
 | ---------| --------- | --------- | ------------------------------------------- |
@@ -79,22 +79,36 @@ When decision splits are reset and subsequently re-learned, TreeGrad can be comp
 | soybean  | **0.936** | **0.936** | 0.917                                       |
 | yeast    | **0.591** | 0.573     | 0.542                                       |
 
-
-# Implementation
-
-<!-- insert link to arxiv paper -->
+## Implementation
 
 To understand the implementation of `TreeGrad`, we interpret a decision tree algorithm to be a three layer neural network, where the layers are as follows:
 
-1.  Node layer, which determines the decision boundaries
-2.  Routing layer, which determines which nodes are used to route to the final leaf nodes
-3.  Leaf layer, the layer which determines the final predictions
+1. **Node layer** — determines the decision boundaries
+2. **Routing layer** — determines which nodes route to final leaf nodes (global product routing)
+3. **Leaf layer** — determines final predictions via fully connected dense layer
 
-In the node layer, the decision boundaries can be interpreted as _axis-parallel_ decision boundaries from your typical Linear Classifier; i.e. a fully connected dense layer
+This approach is the same as Kontschieder, Peter, et al. "Deep neural decision forests."
 
-The routing layer requires a binary routing matrix to which essentially the global product routing is applied
+## New in v2
 
-The leaf layer is your typical fully connected dense layer.
+- Migrated from `setup.py` / nose2 to `pyproject.toml` / pytest + uv
+- Added PyTorch backend alongside autograd (see new notebooks)
+- Ruff linting and formatting
+- Deno fmt for markdown/config files
+- Ty type checking
+- New comparative notebooks: autograd vs. PyTorch implementations
 
-This approach is the same as the one taken by Kontschieder, Peter, et al. "Deep neural decision forests."
+## Citation
 
+```bibtex
+@inproceedings{siu2019transferring,
+  title={Transferring Tree Ensembles to Neural Networks},
+  author={Siu, Chapman},
+  booktitle={International Conference on Neural Information Processing},
+  pages={471--480},
+  year={2019},
+  organization={Springer}
+}
+```
+
+Link: https://arxiv.org/abs/1904.11132
