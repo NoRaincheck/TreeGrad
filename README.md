@@ -7,7 +7,7 @@
 To install
 
 ```
-python setup.py install
+uv sync
 ```
 
 or alternatively from pypi
@@ -20,7 +20,7 @@ pip install treegrad
 Run tests:
 
 ```
-python -m nose2
+uv run pytest
 ```
 
 ```
@@ -54,13 +54,13 @@ The requirements for this package are:
 
 *  lightgbm
 *  scikit-learn
-*  autograd
+*  pytorch
 
 Future plans:
 
 *  Add implementation for Neural Architecture search for decision boundary splits (requires a bit of clean up - TBA)
    *  Implementation can be done quite trivially using objects residing in `tree_utils.py` - Challenge is getting this working in a sane manner with `scikit-learn` interface.
-*  GPU enabled auto differentiation framework - see `notebooks/` for progress off Colab for Tensorflow 2.0 port
+*  GPU enabled auto differentiation framework - the model has been ported to `torch`, enabling GPU acceleration
 *  support xgboost/lightgbm additional features such as monotone constraints
 *  Support `RegressorMixin`
 

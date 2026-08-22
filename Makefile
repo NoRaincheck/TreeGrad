@@ -1,5 +1,8 @@
+.PHONY: publish test
 
 publish:
-	python setup.py sdist bdist_wheel
-	python -m twine upload dist/*
+	uv build
+	uv publish
 
+test:
+	uv run pytest
