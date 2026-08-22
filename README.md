@@ -1,6 +1,6 @@
 # TreeGrad
 
-[![PyPI version](https://badge.fury.io/py/treegrad.png)](https://badge.fury.io/py/treegrad)
+![PyPI Version](https://img.shields.io/pypi/v/treegrad)
 
 `TreeGrad` implements a naive approach to converting a Gradient Boosted Tree Model to an Online trainable model. It does this by creating differentiable tree models which can be learned via auto-differentiable frameworks. `TreeGrad` is in essence an implementation of Kontschieder, Peter, et al. "Deep neural decision forests." with extensions.
 
