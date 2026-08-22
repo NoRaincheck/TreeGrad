@@ -11,10 +11,8 @@ from sklearn.base import BaseEstimator
 from sklearn.utils.validation import check_is_fitted
 from sklearn.preprocessing import LabelBinarizer
 
-import autograd.numpy as np
-from autograd import grad
-from autograd.misc.optimizers import adam
-from autograd.misc.flatten import flatten as weights_flatten
+import numpy as np
+import torch
 
 from treegrad.tree_utils import (
     split_trees_by_classes,
@@ -24,7 +22,15 @@ from treegrad.tree_utils import (
     multi_tree_to_param,
     sigmoid,
     generate_batch,
+    train_adam,
+    flatten_tensors,
 )
+
+DTYPE = torch.float64
+
+
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy()
 
 
 class BaseTreeGrad(BaseEstimator):
@@ -85,15 +91,16 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
                 # Training loss is the negative log-likelihood of the training labels.
                 t_idx_ = batch_indices(idx)
                 preds = model_(weights, X[t_idx_, :])
-                loglik = -np.sum(np.log(preds + esp) * y_ohe[t_idx_, :])
+                loglik = -torch.sum(
+                    torch.log(preds + esp)
+                    * torch.as_tensor(y_ohe[t_idx_, :], dtype=DTYPE)
+                )
 
                 num_unpack = 3
                 reg = 0
-                # reg_l1 = np.sum(np.abs(flattened)) * 1.
                 for idx_ in range(0, len(weights), num_unpack):
                     param_temp_ = weights[idx_ : idx_ + num_unpack]
-                    flattened, _ = weights_flatten(param_temp_[:2])
-                    reg_l1 = np.sum(np.abs(flattened)) * 1.0
+                    reg_l1 = flatten_tensors(param_temp_[:2]).abs().sum()
                     reg += reg_l1
                 return loglik + reg
 
@@ -107,23 +114,20 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
                 # Training loss is the negative log-likelihood of the training labels.
                 t_idx_ = batch_indices(idx)
                 preds = sigmoid(model_(weights, X[t_idx_, :]))
-                label_probabilities = preds * y[t_idx_] + (1 - preds) * (1 - y[t_idx_])
-                # print(label_probabilities)
-                loglik = -np.sum(np.log(label_probabilities))
+                y_t = torch.as_tensor(y[t_idx_], dtype=DTYPE)
+                label_probabilities = preds * y_t + (1 - preds) * (1 - y_t)
+                loglik = -torch.sum(torch.log(label_probabilities))
 
                 num_unpack = 3
                 reg = 0
-                # reg_l1 = np.sum(np.abs(flattened)) * 1.
                 for idx_ in range(0, len(weights), num_unpack):
                     param_temp_ = weights[idx_ : idx_ + num_unpack]
-                    flattened, _ = weights_flatten(param_temp_[:2])
-                    reg_l1 = np.sum(np.abs(flattened)) * 1.0
+                    reg_l1 = flatten_tensors(param_temp_[:2]).abs().sum()
                     reg += reg_l1
                 return loglik + reg
 
-        training_gradient_fun = grad(training_loss)
-        param_ = adam(
-            training_gradient_fun,
+        param_ = train_adam(
+            training_loss,
             trees_params[0],
             callback=callback,
             step_size=step_size,
@@ -169,15 +173,16 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
                 # Training loss is the negative log-likelihood of the training labels.
                 t_idx_ = batch_indices(idx)
                 preds = model_(weights, X[t_idx_, :])
-                loglik = -np.sum(np.log(preds + esp) * y_ohe[t_idx_, :])
+                loglik = -torch.sum(
+                    torch.log(preds + esp)
+                    * torch.as_tensor(y_ohe[t_idx_, :], dtype=DTYPE)
+                )
 
                 num_unpack = 3
                 reg = 0
-                # reg_l1 = np.sum(np.abs(flattened)) * 1.
                 for idx_ in range(0, len(weights), num_unpack):
                     param_temp_ = weights[idx_ : idx_ + num_unpack]
-                    flattened, _ = weights_flatten(param_temp_[:2])
-                    reg_l1 = np.sum(np.abs(flattened)) * 1.0
+                    reg_l1 = flatten_tensors(param_temp_[:2]).abs().sum()
                     reg += reg_l1
                 return loglik + reg
 
@@ -195,23 +200,20 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
                 # Training loss is the negative log-likelihood of the training labels.
                 t_idx_ = batch_indices(idx)
                 preds = sigmoid(model_(weights, X[t_idx_, :]))
-                label_probabilities = preds * y[t_idx_] + (1 - preds) * (1 - y[t_idx_])
-                # print(label_probabilities)
-                loglik = -np.sum(np.log(label_probabilities))
+                y_t = torch.as_tensor(y[t_idx_], dtype=DTYPE)
+                label_probabilities = preds * y_t + (1 - preds) * (1 - y_t)
+                loglik = -torch.sum(torch.log(label_probabilities))
 
                 num_unpack = 3
                 reg = 0
-                # reg_l1 = np.sum(np.abs(flattened)) * 1.
                 for idx_ in range(0, len(weights), num_unpack):
                     param_temp_ = weights[idx_ : idx_ + num_unpack]
-                    flattened, _ = weights_flatten(param_temp_[:2])
-                    reg_l1 = np.sum(np.abs(flattened)) * 1.0
+                    reg_l1 = flatten_tensors(param_temp_[:2]).abs().sum()
                     reg += reg_l1
                 return loglik + reg
 
-        training_gradient_fun = grad(training_loss)
-        param_ = adam(
-            training_gradient_fun,
+        param_ = train_adam(
+            training_loss,
             self.partial_param_,
             callback=callback,
             step_size=step_size,
@@ -246,9 +248,9 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
             )
             preds = model_(self.partial_param_, X)
             if self.n_classes_ > 2:
-                return np.argmax(preds, axis=1)
+                return np.argmax(to_numpy(preds), axis=1)
             else:
-                return np.round(sigmoid(preds))
+                return to_numpy(torch.round(sigmoid(preds)))
 
     def predict_proba(self, X):
         check_is_fitted(self, "base_model_")
@@ -266,10 +268,10 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
             )
             preds = model_(self.partial_param_, X)
             if self.n_classes_ > 2:
-                return preds
+                return to_numpy(preds)
             else:
                 pred_positive = sigmoid(preds)
-                return np.stack([1 - pred_positive, pred_positive], axis=-1)
+                return to_numpy(torch.stack([1 - pred_positive, pred_positive], dim=-1))
 
 
 class TGDRegressor(BaseTreeGrad, RegressorMixin):
@@ -303,23 +305,20 @@ class TGDRegressor(BaseTreeGrad, RegressorMixin):
             # Training loss is the negative log-likelihood of the training labels.
             t_idx_ = batch_indices(idx)
             preds = sigmoid(model_(weights, X[t_idx_, :]))
-            label_probabilities = preds * y[t_idx_] + (1 - preds) * (1 - y[t_idx_])
-            # print(label_probabilities)
-            loglik = -np.sum(np.log(label_probabilities))
+            y_t = torch.as_tensor(y[t_idx_], dtype=DTYPE)
+            label_probabilities = preds * y_t + (1 - preds) * (1 - y_t)
+            loglik = -torch.sum(torch.log(label_probabilities))
 
             num_unpack = 3
             reg = 0
-            # reg_l1 = np.sum(np.abs(flattened)) * 1.
             for idx_ in range(0, len(weights), num_unpack):
                 param_temp_ = weights[idx_ : idx_ + num_unpack]
-                flattened, _ = weights_flatten(param_temp_[:2])
-                reg_l1 = np.sum(np.abs(flattened)) * 1.0
+                reg_l1 = flatten_tensors(param_temp_[:2]).abs().sum()
                 reg += reg_l1
             return loglik + reg
 
-        training_gradient_fun = grad(training_loss)
-        param_ = adam(
-            training_gradient_fun,
+        param_ = train_adam(
+            training_loss,
             trees_params[0],
             callback=callback,
             step_size=step_size,
@@ -354,23 +353,20 @@ class TGDRegressor(BaseTreeGrad, RegressorMixin):
             # Training loss is the negative log-likelihood of the training labels.
             t_idx_ = batch_indices(idx)
             preds = sigmoid(model_(weights, X[t_idx_, :]))
-            label_probabilities = preds * y[t_idx_] + (1 - preds) * (1 - y[t_idx_])
-            # print(label_probabilities)
-            loglik = -np.sum(np.log(label_probabilities))
+            y_t = torch.as_tensor(y[t_idx_], dtype=DTYPE)
+            label_probabilities = preds * y_t + (1 - preds) * (1 - y_t)
+            loglik = -torch.sum(torch.log(label_probabilities))
 
             num_unpack = 3
             reg = 0
-            # reg_l1 = np.sum(np.abs(flattened)) * 1.
             for idx_ in range(0, len(weights), num_unpack):
                 param_temp_ = weights[idx_ : idx_ + num_unpack]
-                flattened, _ = weights_flatten(param_temp_[:2])
-                reg_l1 = np.sum(np.abs(flattened)) * 1.0
+                reg_l1 = flatten_tensors(param_temp_[:2]).abs().sum()
                 reg += reg_l1
             return loglik + reg
 
-        training_gradient_fun = grad(training_loss)
-        param_ = adam(
-            training_gradient_fun,
+        param_ = train_adam(
+            training_loss,
             self.partial_param_,
             callback=callback,
             step_size=step_size,
@@ -405,9 +401,9 @@ class TGDRegressor(BaseTreeGrad, RegressorMixin):
             )
             preds = model_(self.partial_param_, X)
             if self.n_classes_ > 2:
-                return np.argmax(preds, axis=1)
+                return np.argmax(to_numpy(preds), axis=1)
             else:
-                return np.round(sigmoid(preds))
+                return to_numpy(torch.round(sigmoid(preds)))
 
 
 if __name__ == "__main__":
