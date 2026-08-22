@@ -18,4 +18,4 @@ if "lightgbm" in sys.modules:
 
 from treegrad.treegrad import TGDClassifier, TGDRegressor
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"

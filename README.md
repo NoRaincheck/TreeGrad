@@ -40,13 +40,43 @@ Link: https://arxiv.org/abs/1904.11132
 # Usage
 
 ```py
-from sklearn.
 import treegrad as tgd
 
 mod = tgd.TGDClassifier(num_leaves=31, max_depth=-1, learning_rate=0.1, n_estimators=100, autograd_config={'refit_splits':False})
 mod.fit(X, y)
 mod.partial_fit(X, y)
 ```
+
+## Training & performance options
+
+The differentiable ensemble runs on a batched `torch` backend
+(`treegrad.model.TorchTreeEnsemble`): all trees are stacked into padded
+tensors so the forward pass is a handful of fused ops instead of a Python
+loop over trees. Options are passed via the estimator's config dict:
+
+```py
+mod = tgd.TGDClassifier(autograd_config={
+    "step_size": 0.05,      # Adam learning rate
+    "num_iters": 1000,      # optimisation steps
+    "batch_size": 32,       # mini-batch size
+    "shuffle": True,        # reshuffle batches each pass
+    "tau": 0.05,            # initial routing temperature
+    "tau_end": 0.01,        # linear annealing target (None = fixed tau)
+    "lr_schedule": "cosine",  # or None
+    "l1_reg": 0.0,          # L1 penalty on split weights/biases
+    "device": "cpu",        # "cuda" / "mps" for GPU acceleration
+    "dtype": torch.float32,   # or torch.float64
+    "compile": False,       # opt-in torch.compile (eager fallback)
+})
+```
+
+Regression (`TGDRegressor`) trains proper regression objectives on raw leaf
+outputs - `"loss": "mse"` (default) or `"loss": "huber"` - and predicts
+continuous values.
+
+Note (macOS): importing `lightgbm` before `torch`/`treegrad` can segfault
+due to duplicate OpenMP runtimes; import `treegrad` first. TreeGrad's own
+estimators default LightGBM to single-threaded on macOS to avoid this.
 
 # Requirments
 
@@ -62,7 +92,7 @@ Future plans:
    *  Implementation can be done quite trivially using objects residing in `tree_utils.py` - Challenge is getting this working in a sane manner with `scikit-learn` interface.
 *  GPU enabled auto differentiation framework - the model has been ported to `torch`, enabling GPU acceleration
 *  support xgboost/lightgbm additional features such as monotone constraints
-*  Support `RegressorMixin`
+*  closed-form (NDF-style) leaf updates as an alternative to SGD-only leaf tuning
 
 # Results
 
