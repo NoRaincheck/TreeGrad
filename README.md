@@ -122,17 +122,37 @@ When decision splits are reset and subsequently re-learned, TreeGrad can be comp
 
 <!-- insert link to arxiv paper -->
 
-To understand the implementation of `TreeGrad`, we interpret a decision tree algorithm to be a three layer neural network, where the layers are as follows:
+## Tree as a neural network
 
-1.  Node layer, which determines the decision boundaries
-2.  Routing layer, which determines which nodes are used to route to the final leaf nodes
-3.  Leaf layer, the layer which determines the final predictions
+`TreeGrad` interprets a decision tree as a three layer neural network:
 
-In the node layer, the decision boundaries can be interpreted as _axis-parallel_ decision boundaries from your typical Linear Classifier; i.e. a fully connected dense layer
+1.  **Node layer**, which determines the decision boundaries. Axis-parallel splits are equivalent to a fully connected dense layer with one unit per split.
+2.  **Routing layer**, which maps internal nodes to leaves via a binary routing matrix; the global product routing computes the probability of reaching each leaf.
+3.  **Leaf layer**, which produces the final predictions from the routed probabilities.
 
-The routing layer requires a binary routing matrix to which essentially the global product routing is applied
+This is the same formulation as Kontschieder, Peter, et al. "Deep neural decision forests." A LightGBM ensemble is first trained, then converted into this differentiable form (`tree_to_param` / `multi_tree_to_param`) so the split weights/biases and leaf values can be fine-tuned with gradient descent.
 
-The leaf layer is your typical fully connected dense layer.
+## Batched torch backend
 
-This approach is the same as the one taken by Kontschieder, Peter, et al. "Deep neural decision forests."
+The differentiable ensemble lives in `treegrad.model.TorchTreeEnsemble`. Rather than looping over individual trees in Python, all trees are padded to a common size and stacked into single tensors, so the entire forward pass runs as a few fused batched ops:
+
+```
+g(x)          = sigmoid(-clamp(decision / tau, -32, 32))   # soft routing gates
+route_prob    = exp(log(g + eps) @ route.T)                # product routing
+tree_output   = route_prob @ leaf_values
+```
+
+Padded ("fake") nodes and leaves contribute nothing because their routing matrix and leaf entries are zero, making the batched result numerically identical to the per-tree formulation (verified in tests to ~1e-16).
+
+## Training
+
+`partial_fit` optimises all parameters jointly with Adam over tensor-resident mini-batches (no per-step host transfers). Supported features:
+
+*   Numerically stable objectives: `BCEWithLogits` for binary, `cross_entropy` for multiclass classification; proper regression objectives (`mse` or `huber`) on raw leaf outputs for `TGDRegressor`.
+*   Optional L1 regularisation on split weights/biases.
+*   Linear annealing of the routing temperature `tau -> tau_end`, which sharpens soft decisions towards hard splits during fine-tuning.
+*   Optional cosine learning-rate schedule, mini-batch shuffling, and opt-in `torch.compile` (with automatic eager fallback).
+*   Device/dtype selection (`cpu`, `cuda`, `mps`; `float32` or `float64`).
+
+All of these are configured through the estimator's `autograd_config` dict — see [Training & performance options](#training--performance-options) above.
 
