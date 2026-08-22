@@ -92,8 +92,7 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
                 t_idx_ = batch_indices(idx)
                 preds = model_(weights, X[t_idx_, :])
                 loglik = -torch.sum(
-                    torch.log(preds + esp)
-                    * torch.as_tensor(y_ohe[t_idx_, :], dtype=DTYPE)
+                    torch.log(preds + esp) * torch.as_tensor(y_ohe[t_idx_, :], dtype=DTYPE)
                 )
 
                 num_unpack = 3
@@ -174,8 +173,7 @@ class TGDClassifier(BaseTreeGrad, ClassifierMixin):
                 t_idx_ = batch_indices(idx)
                 preds = model_(weights, X[t_idx_, :])
                 loglik = -torch.sum(
-                    torch.log(preds + esp)
-                    * torch.as_tensor(y_ohe[t_idx_, :], dtype=DTYPE)
+                    torch.log(preds + esp) * torch.as_tensor(y_ohe[t_idx_, :], dtype=DTYPE)
                 )
 
                 num_unpack = 3
