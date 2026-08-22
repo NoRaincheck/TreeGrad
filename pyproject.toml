@@ -31,3 +31,6 @@ packages = ["treegrad"]
 
 [tool.pytest.ini_options]
 testpaths = ["treegrad/tests"]
+
+[tool.ruff]
+extend-exclude = ["notebooks"]

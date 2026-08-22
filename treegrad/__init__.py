@@ -1,4 +1,5 @@
 """TreeGrad."""
+
 import sys
 import warnings
 
@@ -17,5 +18,7 @@ if "lightgbm" in sys.modules:
     )
 
 from treegrad.treegrad import TGDClassifier, TGDRegressor
+
+__all__ = ["TGDClassifier", "TGDRegressor"]
 
 __version__ = "1.1.0"

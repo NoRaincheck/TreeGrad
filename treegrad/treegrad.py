@@ -8,6 +8,7 @@ The differentiable ensemble runs on a batched torch implementation
 into tensors, trained with ``torch.optim.Adam`` using numerically stable
 losses (BCEWithLogits / cross-entropy / MSE / Huber).
 """
+
 import sys
 
 import lightgbm as lgb
@@ -52,7 +53,7 @@ class BaseTreeGrad(BaseEstimator):
         max_depth=-1,
         learning_rate=0.1,
         n_estimators=100,
-        autograd_config={"refit_splits": False, "batch_size": 32},
+        autograd_config={"batch_size": 32},
     ):
         self.ensemble_config = {
             "num_leaves": num_leaves,
@@ -87,7 +88,6 @@ class BaseTreeGrad(BaseEstimator):
             "tau_end": self._cfg("tau_end"),
             "shuffle": self._cfg("shuffle", True),
             "lr_schedule": self._cfg("lr_schedule"),
-            "l1_reg": self._cfg("l1_reg", 0.0),
             "compile_mode": self._cfg("compile", False),
             "verbose": self._cfg("verbose", False),
         }

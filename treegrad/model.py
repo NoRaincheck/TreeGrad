@@ -72,7 +72,9 @@ class TorchTreeEnsemble(nn.Module):
         super().__init__()
         params = list(all_param)
         if len(params) % 3 != 0:
-            raise ValueError("all_param must be a flat list of [coef, inter, leaf] triples")
+            raise ValueError(
+                "all_param must be a flat list of [coef, inter, leaf] triples"
+            )
         num_trees = len(params) // 3
 
         nested = len(all_route) > 0 and isinstance(all_route[0], (list, tuple))
@@ -98,11 +100,13 @@ class TorchTreeEnsemble(nn.Module):
 
         coef_np, inter_np, leaf_np, mask_np, route_np = [], [], [], [], []
         for t in range(num_trees):
-            coef_t, inter_t, leaf_t = params[3*t:3*t+3]
+            coef_t, inter_t, leaf_t = params[3 * t : 3 * t + 3]
             route_t = routes[t]
             mask_t = infos[t]
             if route_t is None:
-                raise ValueError("tree {} has no routing matrix; cannot build ensemble".format(t))
+                raise ValueError(
+                    "tree {} has no routing matrix; cannot build ensemble".format(t)
+                )
             coef_np.append(np.asarray(coef_t, dtype=np.float64))
             inter_np.append(np.asarray(inter_t, dtype=np.float64))
             leaf_np.append(np.asarray(leaf_t, dtype=np.float64).reshape(-1))
@@ -112,9 +116,7 @@ class TorchTreeEnsemble(nn.Module):
         self.num_trees = num_trees
         self.num_classes = num_classes_
         self.eps = eps
-        self.register_buffer(
-            "tau", torch.tensor(float(tau), dtype=torch.float64)
-        )
+        self.register_buffer("tau", torch.tensor(float(tau), dtype=torch.float64))
 
         n_feat = mask_np[0].shape[0]
         s_max = max(int(m.shape[1]) for m in mask_np)
@@ -139,7 +141,7 @@ class TorchTreeEnsemble(nn.Module):
             # must be re-offset from column s_t to column s_max.
             route_t = torch.from_numpy(route_np[t])
             route[t, :n_leaves, :s] = route_t[:, :s]
-            route[t, :n_leaves, s_max:s_max+s] = route_t[:, s:]
+            route[t, :n_leaves, s_max : s_max + s] = route_t[:, s:]
 
         self.coef = nn.Parameter(coef)
         self.inter = nn.Parameter(inter)
@@ -161,9 +163,9 @@ class TorchTreeEnsemble(nn.Module):
         # effective split weights: zeroed-out entries via feature mask
         weights = self.mask * self.coef.unsqueeze(1)  # (T, F, S)
         decisions_left = torch.einsum("bf,tfs->bts", X, weights)
-        decisions = torch.cat(
-            [decisions_left, -decisions_left], dim=-1
-        ) + torch.cat([self.inter, -self.inter], dim=-1).unsqueeze(0)
+        decisions = torch.cat([decisions_left, -decisions_left], dim=-1) + torch.cat(
+            [self.inter, -self.inter], dim=-1
+        ).unsqueeze(0)
 
         # legacy gumbel_softmax: 1 / (1 + exp(clamp(x / tau))) == sigmoid(-x/tau)
         z = torch.clamp(decisions / self.tau, -32, 32)
@@ -171,13 +173,9 @@ class TorchTreeEnsemble(nn.Module):
         decision_soft = torch.log(gate + self.eps)
 
         route_probas = torch.exp(
-            torch.einsum(
-                "bts,tsl->btl", decision_soft, self.route.transpose(1, 2)
-            )
+            torch.einsum("bts,tsl->btl", decision_soft, self.route.transpose(1, 2))
         )  # (B, T, L)
-        tree_out = torch.einsum(
-            "btl,tl->bt", route_probas, self.leaf
-        )
+        tree_out = torch.einsum("btl,tl->bt", route_probas, self.leaf)
 
         if self.num_classes > 2:
             batch = X.shape[0]
@@ -216,14 +214,20 @@ def make_loss_fn(task, num_classes=2, loss=None, l1_reg=0.0):
             "huber": F.smooth_l1_loss,
         }
         if loss not in reduction_loss:
-            raise ValueError("regression loss must be one of {}, got {}".format(sorted(reduction_loss), loss))
+            raise ValueError(
+                "regression loss must be one of {}, got {}".format(
+                    sorted(reduction_loss), loss
+                )
+            )
 
         def loss_fn(model, xb, yb):
             out = reduction_loss[loss](model(xb), yb.float())
             return out + l1_reg * _l1(model)
 
     else:
-        raise ValueError("task must be 'classification' or 'regression', got {}".format(task))
+        raise ValueError(
+            "task must be 'classification' or 'regression', got {}".format(task)
+        )
     return loss_fn
 
 
@@ -243,13 +247,12 @@ def fit_ensemble(
     tau_end=None,
     shuffle=True,
     lr_schedule=None,
-    l1_reg=0.0,
     compile_mode=False,
     verbose=False,
 ):
     """
-    Convenience wrapper: same loop as :func:`train_ensemble` but takes an
-    explicit ``loss_fn(model, xb, yb)`` (see :func:`make_loss_fn`).
+    Convenience wrapper: optimises ``loss_fn(model, xb, yb)`` with Adam
+    (regularisation belongs in the loss itself; see :func:`make_loss_fn`).
     """
     device = model.coef.device
     dtype = model.coef.dtype
@@ -287,19 +290,21 @@ def fit_ensemble(
         if shuffle and it % num_batches == 0:
             order = torch.randperm(n, device=device)
         pos = (it % num_batches) * batch_size
-        idx = order[pos:pos+batch_size]
+        idx = order[pos : pos + batch_size]
         if tau_end is not None:
             frac = (it + 1) / num_iters
             model.set_tau(start_tau + (float(tau_end) - start_tau) * frac)
 
         optimizer.zero_grad()
-        loss = loss_fn(run_model, X_t[idx], y_t[idx]) + l1_reg * _l1(model)
+        loss = loss_fn(run_model, X_t[idx], y_t[idx])
         loss.backward()
         optimizer.step()
         if scheduler is not None:
             scheduler.step()
 
         if verbose and ((it + 1) % stride == 0 or it == 0):
-            print("Iteration {} / {} (loss {:.6f})".format(it + 1, num_iters, float(loss)))
+            print(
+                "Iteration {} / {} (loss {:.6f})".format(it + 1, num_iters, float(loss))
+            )
 
     return run_model

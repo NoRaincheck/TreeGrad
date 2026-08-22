@@ -1,4 +1,0 @@
-[flake8]
-ignore = E501,W293,W291,E203,E226,W503
-exclude =
-    .ipynb_checkpoints

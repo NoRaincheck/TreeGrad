@@ -27,7 +27,9 @@ def test_binary():
 
 
 def test_regression_quality_and_continuity():
-    X, y = make_regression(300, n_features=8, n_informative=6, noise=5.0, random_state=7)
+    X, y = make_regression(
+        300, n_features=8, n_informative=6, noise=5.0, random_state=7
+    )
     model = TGDRegressor(
         n_estimators=20, autograd_config={"num_iters": 150, "batch_size": 64}
     )

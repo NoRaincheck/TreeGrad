@@ -39,13 +39,19 @@ Link: https://arxiv.org/abs/1904.11132
 
 # Usage
 
+`fit` trains a LightGBM ensemble; `partial_fit` transfers those trees into a
+differentiable `torch` model and fine-tunes them. Call `partial_fit`
+repeatedly for continued online training.
+
 ```py
 import treegrad as tgd
 
-mod = tgd.TGDClassifier(num_leaves=31, max_depth=-1, learning_rate=0.1, n_estimators=100, autograd_config={'refit_splits':False})
+mod = tgd.TGDClassifier(num_leaves=31, max_depth=-1, learning_rate=0.1, n_estimators=100)
 mod.fit(X, y)
 mod.partial_fit(X, y)
 ```
+
+Regression is available via `TGDRegressor`, which predicts continuous values.
 
 ## Training & performance options
 
@@ -55,6 +61,8 @@ tensors so the forward pass is a handful of fused ops instead of a Python
 loop over trees. Options are passed via the estimator's config dict:
 
 ```py
+import torch
+
 mod = tgd.TGDClassifier(autograd_config={
     "step_size": 0.05,      # Adam learning rate
     "num_iters": 1000,      # optimisation steps
@@ -78,7 +86,7 @@ Note (macOS): importing `lightgbm` before `torch`/`treegrad` can segfault
 due to duplicate OpenMP runtimes; import `treegrad` first. TreeGrad's own
 estimators default LightGBM to single-threaded on macOS to avoid this.
 
-# Requirments
+# Requirements
 
 The requirements for this package are:
 

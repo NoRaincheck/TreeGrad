@@ -52,18 +52,22 @@ def _multiclass_params():
 def test_batched_forward_matches_legacy_binary():
     X, _, tp = _binary_params()
     legacy = gbm_gen(tp[0], X, tp[2], tp[1], False, 2)(tp[0], X).detach().numpy()
-    batched = TorchTreeEnsemble(tp[0], tp[2], tp[1], num_classes=2, dtype=torch.float64)(
-        X
-    ).detach().numpy()
+    batched = (
+        TorchTreeEnsemble(tp[0], tp[2], tp[1], num_classes=2, dtype=torch.float64)(X)
+        .detach()
+        .numpy()
+    )
     assert np.abs(legacy - batched).max() < 1e-9
 
 
 def test_batched_forward_matches_legacy_multiclass():
     X, _, tp = _multiclass_params()
     legacy = gbm_gen(tp[0], X, tp[2], tp[1], True, 3)(tp[0], X).detach().numpy()
-    logits = TorchTreeEnsemble(tp[0], tp[2], tp[1], num_classes=3, dtype=torch.float64)(
-        X
-    ).detach().numpy()
+    logits = (
+        TorchTreeEnsemble(tp[0], tp[2], tp[1], num_classes=3, dtype=torch.float64)(X)
+        .detach()
+        .numpy()
+    )
     z = logits - logits.max(axis=1, keepdims=True)
     probs = np.exp(z) / np.exp(z).sum(axis=1, keepdims=True)
     assert np.abs(legacy - probs).max() < 1e-9
@@ -71,7 +75,9 @@ def test_batched_forward_matches_legacy_multiclass():
 
 def test_estimator_dtype_and_device_config():
     X, y = make_classification(80, n_classes=2, n_features=6, random_state=0)
-    model = TGDClassifier(n_estimators=10, autograd_config={"num_iters": 2, "dtype": "float64"})
+    model = TGDClassifier(
+        n_estimators=10, autograd_config={"num_iters": 2, "dtype": "float64"}
+    )
     model.fit(X, y)
     model.partial_fit(X, y)
     assert model.model_.coef.dtype == torch.float64
@@ -117,7 +123,9 @@ def test_compile_mode_runs():
 
 
 def test_multiclass_proba_sums_to_one():
-    X, y = make_classification(100, n_classes=3, n_informative=4, n_features=8, random_state=5)
+    X, y = make_classification(
+        100, n_classes=3, n_informative=4, n_features=8, random_state=5
+    )
     model = TGDClassifier(n_estimators=10, autograd_config={"num_iters": 3})
     model.fit(X, y)
     model.partial_fit(X, y)
