@@ -16,12 +16,10 @@ from scipy.special import expit, logit
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import LabelBinarizer
 
-import autograd.numpy as np
+import numpy as np
 import numpy
 import scipy.sparse
-from autograd import grad
-from autograd.misc.optimizers import adam
-from autograd.misc.flatten import flatten as weights_flatten
+import torch
 
 from sklearn.metrics import roc_auc_score
 
@@ -224,10 +222,15 @@ class Tree(BaseTree):
         self.route_list = old_route_to_new_route(self.route, self.nodes)
 
 
+def flatten_tensors(params):
+    """Flattens an iterable of arrays/tensors into a single vector."""
+    return torch.cat([torch.as_tensor(p, dtype=torch.float64).reshape(-1) for p in params])
+
+
 def l2_norm(params):
     """Computes l2 norm of params by flattening them into a vector."""
-    flattened, _ = weights_flatten(params)
-    return np.dot(flattened, flattened)
+    flattened = flatten_tensors(params)
+    return torch.dot(flattened, flattened)
 
 
 def get_route(tree):
@@ -541,16 +544,16 @@ def boundary_dict_mapping(X, boundary_dict, mode="raw"):
 
 
 def sigmoid(z):
-    z = np.clip(z, -32, 32)
-    return 1.0 / (1 + np.exp(-z))
+    z = torch.as_tensor(z, dtype=torch.float64)
+    z = torch.clamp(z, -32, 32)
+    return 1.0 / (1 + torch.exp(-z))
 
 
 # softmax by axis...
 def gumbel_softmax(X, tau=1.0, eps=np.finfo(float).eps):
     # element-wise gumbel softmax
-    # return np.exp(np.log(X+eps)/temp)/np.sum(np.exp(np.log(X+eps)/temp), axis=1)[:, np.newaxis]
-    X_temp = np.clip(X / tau, -32, 32)
-    return 1 / (1 + np.exp(X_temp))
+    X_temp = torch.clamp(torch.as_tensor(X, dtype=torch.float64) / tau, -32, 32)
+    return 1 / (1 + torch.exp(X_temp))
 
 
 def proba_to_alpha(proba=0.1):
@@ -623,33 +626,42 @@ def gbm_gen(
     tau=0.01,
     eps=1e-11,
 ):
-    def decision_tree(param, X, route, sparse_info, tau=tau, eps=eps):
-        coef, inter, leaf = param
-        # coef_sparse = scipy.sparse.coo_matrix((coef, (sparse_row_col[0], sparse_row_col[1])), shape=(X.shape[1], inter.shape[0])).todense() # this is just a hack
+    def to_tensor(x):
+        # routes/sparse info may be nested per-class lists of per-tree arrays
+        if x is None:
+            return None
+        if isinstance(x, (list, tuple)):
+            return [to_tensor(xi) for xi in x]
+        return torch.as_tensor(np.asarray(x), dtype=torch.float64)
 
+    route_tensors = [to_tensor(r) for r in all_route]
+    sparse_info_tensors = [to_tensor(s) for s in all_sparse_info]
+
+    def decision_tree(param, X, route, sparse_info, tau=tau, eps=eps):
+        coef, inter, leaf = [
+            torch.as_tensor(p, dtype=torch.float64) for p in param
+        ]
         # no sparsity
         coef_sparse = sparse_info * coef
-        decisions = np.dot(X, np.hstack([coef_sparse, -coef_sparse])) + np.hstack(
+        decisions = X @ torch.hstack([coef_sparse, -coef_sparse]) + torch.hstack(
             [inter, -inter]
         )
-        decision_soft = np.log(gumbel_softmax(decisions, tau=tau) + eps)
-        route_probas = np.exp(np.dot(decision_soft, route.T))
-        proba = np.dot(route_probas, leaf)
+        decision_soft = torch.log(gumbel_softmax(decisions, tau=tau) + eps)
+        route_probas = torch.exp(decision_soft @ route.T)
+        proba = route_probas @ leaf
         return proba
 
-    # boosted_tree = reduce(lambda x, y: x+y, [decision_tree(X, y, tree) for tree in trees])
     def boosted_tree(
-        all_param, X, all_route=all_route, all_sparse_info=all_sparse_info
+        all_param, X, all_route=route_tensors, all_sparse_info=sparse_info_tensors
     ):
         # roll up params
+        X = torch.as_tensor(np.asarray(X), dtype=torch.float64)
 
         tree_pred = []
         num_unpack = 3
         for idx in range(0, len(all_param), num_unpack):
             param = all_param[idx : idx + num_unpack]
-            # print(len(param))
             other_idx = idx // num_unpack
-            # print(idx, other_idx)
             tree_pred.append(
                 decision_tree(
                     param, X, all_route[other_idx], all_sparse_info[other_idx]
@@ -661,12 +673,13 @@ def gbm_gen(
     def multi_tree(
         all_param,
         X,
-        all_route=all_route,
-        all_sparse_info=all_sparse_info,
+        all_route=route_tensors,
+        all_sparse_info=sparse_info_tensors,
         num_classes=num_classes,
     ):
         # this is for multiclass trees
         # we need to unpack for each class...and then run the boosted tree
+        X = torch.as_tensor(np.asarray(X), dtype=torch.float64)
         num_unpack = len(all_param) // num_classes
         class_prediction = []
         for idx in range(0, len(all_param), num_unpack):
@@ -677,10 +690,10 @@ def gbm_gen(
             class_prediction.append(
                 boosted_tree(booster_param, X, booster_route, booster_sparse_info)
             )
-        class_prediction = [np.exp(x) for x in class_prediction]
+        class_prediction = [torch.exp(x) for x in class_prediction]
         class_total = reduce(lambda x, y: x + y, class_prediction)
 
-        return np.stack([x / class_total for x in class_prediction], axis=-1)
+        return torch.stack([x / class_total for x in class_prediction], dim=-1)
 
     if not multi:
         return boosted_tree
@@ -691,6 +704,36 @@ def gbm_gen(
 def simple_callback(params, t, g):
     if (t + 1) % 1 == 0:
         print("Iteration {}".format(t + 1))
+
+
+def train_adam(
+    training_loss_fun,
+    x,
+    callback=None,
+    num_iters=200,
+    step_size=0.001,
+    b1=0.9,
+    b2=0.999,
+    eps=1e-8,
+):
+    """
+    Adam training loop on torch, mirroring the call signature of
+    autograd.misc.optimizers.adam. `x` is a list of arrays/tensors;
+    returns a list of updated tensors.
+    """
+    tensors = [
+        torch.as_tensor(p, dtype=torch.float64).detach().clone().requires_grad_(True)
+        for p in x
+    ]
+    optimizer = torch.optim.Adam(tensors, lr=step_size, betas=(b1, b2), eps=eps)
+    for i in range(num_iters):
+        optimizer.zero_grad()
+        loss = training_loss_fun(tensors, i)
+        loss.backward()
+        optimizer.step()
+        if callback is not None:
+            callback(tensors, i, None)
+    return tensors
 
 
 def update_tree_info(tree, split_index, threshold, split_feature=None):
@@ -771,7 +814,7 @@ def main():
     )
 
     model = lgb.LGBMClassifier(
-        boosting_type="gbdt", objective="binary", n_estimators=3, random_state=1
+        boosting_type="gbdt", n_estimators=3, random_state=1
     )
     model.fit(X, y)
 
@@ -795,7 +838,9 @@ def main():
         def training_loss(weights, idx=0):
             # Training loss is the negative log-likelihood of the training labels.
             preds = model_(weights, X)
-            loglik = -np.sum(np.log(preds + 1e-7) * y_ohe)
+            loglik = -torch.sum(
+                torch.log(preds + 1e-7) * torch.as_tensor(y_ohe, dtype=torch.float64)
+            )
 
             return loglik
 
@@ -806,15 +851,15 @@ def main():
         def training_loss(weights, idx=0):
             # Training loss is the negative log-likelihood of the training labels.
             preds = sigmoid(model_(weights, X))
-            label_probabilities = preds * y + (1 - preds) * (1 - y)
-            loglik = -np.sum(np.log(label_probabilities))
+            y_t = torch.as_tensor(y, dtype=torch.float64)
+            label_probabilities = preds * y_t + (1 - preds) * (1 - y_t)
+            loglik = -torch.sum(torch.log(label_probabilities))
 
             return loglik
 
     # training the model and outputting results
-    training_gradient_fun = grad(training_loss)
-    param_ = adam(
-        training_gradient_fun,
+    param_ = train_adam(
+        training_loss,
         trees_params[0],
         callback=simple_callback,
         step_size=0.05,
@@ -826,8 +871,8 @@ def main():
         lgb_predict = lgb_predict[:, 1]
 
     results = {
-        "train_base": roc_auc_score(y_ohe, model_(trees_params[0], X)),
-        "train_nnet": roc_auc_score(y_ohe, model_(param_, X)),
+        "train_base": roc_auc_score(y_ohe, model_(trees_params[0], X).detach().numpy()),
+        "train_nnet": roc_auc_score(y_ohe, model_(param_, X).detach().numpy()),
         "train_lgb": roc_auc_score(y_ohe, lgb_predict),
     }
     return results
